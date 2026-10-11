@@ -54,6 +54,15 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Cloudflare Workers (OpenNext) build: `pg` requires "pg-cloudflare" for its
+  // Workers socket. pg-cloudflare's package.json maps that to ./dist/index.js
+  // only under the "workerd" export condition; Next's standalone file tracing
+  // resolves with Node conditions and so copies just dist/empty.js. OpenNext's
+  // esbuild step then resolves with "workerd" and fails with
+  // `Could not resolve "pg-cloudflare"`. Force the real files into the trace.
+  outputFileTracingIncludes: {
+    "/**": ["./node_modules/pg-cloudflare/dist/**/*", "./node_modules/pg-cloudflare/esm/**/*"],
+  },
   images: {
     // Editorial/destination imagery is sourced from Unsplash as placeholders
     // during development — swap for licensed/company-owned photography via
