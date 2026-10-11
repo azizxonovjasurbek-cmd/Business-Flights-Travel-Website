@@ -1,0 +1,171 @@
+import type { Metadata } from "next";
+import Image from "next/image";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { Reveal } from "@/components/Reveal";
+import { PostCard } from "@/components/blog/PostCard";
+import { RichContent } from "@/components/blog/RichContent";
+import { CTASection } from "@/components/sections/CTASection";
+import { blogPosts, getBlogPostBySlug } from "@/data/blog-posts";
+import { SITE_NAME, SITE_URL } from "@/lib/constants";
+import { formatIsoDate } from "@/lib/format-date";
+
+// Only the slugs in blog-posts.ts exist. Unknown slugs must be a real HTTP 404: with the
+// root loading.tsx (a Suspense boundary) an on-demand render of an unknown slug streams
+// the not-found UI with status 200 + noindex + the homepage canonical — a soft 404 that
+// Search Console reports as "noindex" instead of "not found".
+export const dynamicParams = false;
+
+export function generateStaticParams() {
+  return blogPosts.map((p) => ({ slug: p.slug }));
+}
+
+export async function generateMetadata({ params }: PageProps<"/blog/[slug]">): Promise<Metadata> {
+  const { slug } = await params;
+  const post = getBlogPostBySlug(slug);
+  if (!post) return {};
+  // seoTitle already includes the "| Business Flights Travel" suffix, so the
+  // title must bypass the root layout's title template (`%s | Business Flights
+  // Travel`) — otherwise the suffix is appended twice. When that full title would
+  // run past ~65 characters (search results cut it off), the brand suffix is
+  // dropped: the site name still appears in the result's site-name line.
+  const brandSuffix = ` | ${SITE_NAME}`;
+  const title = post.seoTitle.length > 65 && post.seoTitle.endsWith(brandSuffix) ? post.seoTitle.slice(0, -brandSuffix.length) : post.seoTitle;
+  const url = `/blog/${post.slug}`;
+  return {
+    title: { absolute: title },
+    description: post.seoDescription,
+    alternates: { canonical: url },
+    openGraph: {
+      type: "article",
+      title,
+      description: post.seoDescription,
+      url,
+      siteName: SITE_NAME,
+      images: [{ url: post.featuredImage, alt: post.title }],
+      publishedTime: post.publishedAt,
+      modifiedTime: post.updatedAt,
+    },
+    // Without this, Next falls back to the generic branded twitter-image.tsx
+    // instead of reusing openGraph.images.
+    twitter: { card: "summary_large_image", title, description: post.seoDescription, images: [post.featuredImage] },
+  };
+}
+
+export default async function BlogPostPage({ params }: PageProps<"/blog/[slug]">) {
+  const { slug } = await params;
+  const post = getBlogPostBySlug(slug);
+  if (!post) notFound();
+
+  const related = blogPosts.filter((p) => post.relatedSlugs.includes(p.slug));
+
+  const articleJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: post.title,
+    description: post.seoDescription,
+    image: post.featuredImage,
+    author: { "@type": "Organization", name: post.author },
+    publisher: { "@type": "Organization", name: SITE_NAME },
+    datePublished: post.publishedAt,
+    dateModified: post.updatedAt,
+    mainEntityOfPage: `${SITE_URL}/blog/${post.slug}`,
+  };
+
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Home", item: SITE_URL },
+      { "@type": "ListItem", position: 2, name: "Blog", item: `${SITE_URL}/blog` },
+      { "@type": "ListItem", position: 3, name: post.title, item: `${SITE_URL}/blog/${post.slug}` },
+    ],
+  };
+
+  // Only emitted when the article body actually contains that exact Q&A
+  // content (post.faqs) — never added purely to qualify for a rich result.
+  const faqJsonLd =
+    post.faqs && post.faqs.length > 0
+      ? {
+          "@context": "https://schema.org",
+          "@type": "FAQPage",
+          mainEntity: post.faqs.map((f) => ({
+            "@type": "Question",
+            name: f.question,
+            acceptedAnswer: { "@type": "Answer", text: f.answer },
+          })),
+        }
+      : null;
+
+  return (
+    <>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(articleJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }} />
+      {faqJsonLd && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }} />}
+
+      <article className="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
+        <Reveal>
+          <nav aria-label="Breadcrumb" className="text-xs text-[var(--color-navy-950)]/65">
+            <Link href="/blog" className="hover:text-[var(--color-navy-950)]">Blog</Link> <span className="mx-1">/</span> {post.category}
+          </nav>
+          <p className="mt-4 text-xs font-semibold tracking-[0.2em] text-[var(--color-gold-600)]">{post.category.toUpperCase()}</p>
+          <h1 className="mt-3 text-[clamp(1.75rem,4vw,2.5rem)] font-display font-semibold leading-tight text-[var(--color-navy-950)]">{post.title}</h1>
+          <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--color-navy-950)]/65">
+            <span>{post.author}</span>
+            <span aria-hidden="true">·</span>
+            <time dateTime={post.publishedAt}>{formatIsoDate(post.publishedAt)}</time>
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.08}>
+          <div className="relative mt-8 aspect-[16/9] w-full overflow-hidden rounded-2xl">
+            <Image src={post.featuredImage} alt={post.title} fill sizes="(min-width: 768px) 768px, 100vw" className="object-cover" priority />
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.12}>
+          <div className="mt-8">
+            <RichContent blocks={post.content} />
+          </div>
+
+          {post.faqs && post.faqs.length > 0 && (
+            <div className="mt-10 border-t border-[var(--color-navy-950)]/8 pt-8">
+              <h2 className="font-display text-xl font-semibold text-[var(--color-navy-950)] sm:text-2xl">Frequently Asked Questions</h2>
+              <div className="mt-5 space-y-4">
+                {post.faqs.map((f) => (
+                  <div key={f.question} className="rounded-xl bg-[var(--color-cream-100)] p-5">
+                    <h3 className="font-display text-base font-semibold text-[var(--color-navy-950)]">{f.question}</h3>
+                    <p className="mt-1.5 text-sm leading-relaxed text-[var(--color-navy-950)]/70">{f.answer}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="mt-8 flex flex-wrap gap-2">
+            {post.tags.map((tag) => (
+              <span key={tag} className="rounded-full bg-[var(--color-cream-100)] px-3 py-1 text-xs text-[var(--color-navy-700)]">
+                {tag}
+              </span>
+            ))}
+          </div>
+        </Reveal>
+      </article>
+
+      {related.length > 0 && (
+        <section className="mx-auto max-w-7xl px-4 pb-20 sm:px-6 lg:px-8">
+          <Reveal>
+            <h2 className="font-display text-2xl font-semibold text-[var(--color-navy-950)]">Related Articles</h2>
+          </Reveal>
+          <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {related.map((p) => (
+              <PostCard key={p.slug} post={p} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      <CTASection />
+    </>
+  );
+}

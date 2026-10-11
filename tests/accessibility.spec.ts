@@ -1,0 +1,197 @@
+import { test, expect } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
+
+// Automated axe-core scans across the site's main page types, plus a few
+// manual keyboard/focus/reduced-motion checks axe can't verify on its own
+// (it flags missing/invalid a11y attributes and contrast, but not whether
+// a control is actually reachable and operable by keyboard alone, or
+// whether focus is visible). Not wired into the main `redesign.spec.ts`
+// file — this is a separate concern (WCAG conformance vs. functional
+// regression), run the same way against the same dev server.
+const PAGES = [
+  { name: "Homepage", path: "/" },
+  { name: "Destinations index", path: "/destinations" },
+  { name: "Destination detail", path: "/destinations/europe/france/paris" },
+  { name: "Blog index", path: "/blog" },
+  { name: "Blog article", path: "/blog/business-class-etiquette-guide" },
+  { name: "About", path: "/about" },
+  { name: "Contact", path: "/contact" },
+  { name: "Flights (request form)", path: "/flights" },
+];
+
+for (const { name, path } of PAGES) {
+  test(`axe: ${name} has no automatically-detectable a11y violations`, async ({ page }) => {
+    await page.goto(path);
+    // Let Reveal's whileInView fade-ins (550ms) finish before scanning —
+    // axe evaluates the DOM's current computed styles at the instant it
+    // runs, and catching an element mid-fade (its container still at
+    // partial opacity) can register as a transient color-contrast failure
+    // that has nothing to do with the element's actual, resting-state
+    // contrast. Confirmed by hand for the specific case this surfaced
+    // (gold-500/navy-950 CTA button, 7.14:1 at rest — comfortably passes).
+    await page.waitForTimeout(900);
+    // The floating call button is mounted late (deferred chunk) and fades in over
+    // 250 ms; scanning it mid-fade reads its label at partial opacity and can
+    // report a transient contrast failure. Wait until it has fully appeared.
+    await page.waitForFunction(() => {
+      const fab = document.querySelector('a.fixed[href^="tel:"]');
+      // (On pages with their own primary button in view it deliberately hides itself: aria-hidden.)
+      return !fab || fab.getAttribute("aria-hidden") === "true" || getComputedStyle(fab).opacity === "1";
+    });
+    const results = await new AxeBuilder({ page })
+      // Best-practice rules (e.g. "region", "landmark-unique") are useful
+      // guidance but not WCAG failures on their own — scoring only against
+      // the actual WCAG 2.x A/AA rule sets keeps this test meaningful
+      // (fails on real conformance issues) rather than noisy.
+      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+      .analyze();
+
+    if (results.violations.length > 0) {
+      const summary = results.violations
+        .map((v) => `[${v.impact}] ${v.id}: ${v.help} (${v.nodes.length} node(s))\n  ${v.nodes.map((n) => n.target.join(" ")).join("\n  ")}`)
+        .join("\n\n");
+      throw new Error(`${results.violations.length} a11y violation(s) on ${path}:\n\n${summary}`);
+    }
+    expect(results.violations).toEqual([]);
+  });
+}
+
+test.describe("Keyboard and focus", () => {
+  test("skip link is the first focus stop and jumps to main content", async ({ page }) => {
+    await page.goto("/");
+    await page.keyboard.press("Tab");
+    const active = page.locator(":focus");
+    await expect(active).toHaveAttribute("href", "#main-content");
+    await active.press("Enter");
+    // Focus should land on/inside #main-content once the skip link is activated.
+    const main = page.locator("#main-content");
+    await expect(main).toBeVisible();
+  });
+
+  test("primary nav links are reachable and visibly focused via keyboard", async ({ page }) => {
+    await page.goto("/");
+    // Tab from the top past the skip link and logo to the first nav link.
+    for (let i = 0; i < 4; i++) await page.keyboard.press("Tab");
+    const active = page.locator(":focus");
+    const outline = await active.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return cs.outlineStyle !== "none" || cs.boxShadow !== "none";
+    });
+    expect(outline).toBe(true);
+  });
+
+  test("mobile menu opens, traps focus usefully, and closes on Escape", async ({ page }) => {
+    await page.goto("/");
+    const menuButton = page.getByRole("button", { name: /open menu/i });
+    // The hamburger button only renders (lg:hidden) on narrow viewports —
+    // Playwright's `isMobile` fixture isn't set for this config's custom
+    // Mobile 320/375/390 projects (it's tied to devices[...] presets), so
+    // checking the button's actual presence is the reliable signal instead.
+    test.skip((await menuButton.count()) === 0, "desktop project — no hamburger button");
+    await menuButton.click();
+    await expect(page.getByRole("button", { name: /close menu/i })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: /open menu/i })).toBeVisible();
+  });
+
+  test("airport autocomplete is fully keyboard-operable", async ({ page }) => {
+    await page.goto("/flights");
+    const fromField = page.getByPlaceholder("City or airport code").first();
+    await fromField.click();
+    await fromField.fill("New York");
+    // Wait for the search to actually resolve and the listbox to open,
+    // rather than a fixed timeout guessing at debounce/search latency —
+    // deterministic across machines/throttling instead of occasionally
+    // racing the results on a slower run.
+    await expect(fromField).toHaveAttribute("aria-expanded", "true");
+    await page.keyboard.press("ArrowDown");
+    await expect(fromField).toHaveAttribute("aria-activedescendant", /-option-0$/);
+    await page.keyboard.press("Enter");
+    // A selection should populate the field with a real airport label.
+    await expect(fromField).not.toHaveValue("New York");
+  });
+});
+
+test.describe("Floating call button", () => {
+  // An article page: no primary-CTA button in view at the top, so the pill is showing.
+  const ARTICLE = "/blog/business-class-vs-first-class";
+
+  // A visitor who has already answered the cookie notice (while the notice is up the
+  // pill deliberately hides itself, like it does for any other bottom call-to-action).
+  async function answeredCookieNotice(page: import("@playwright/test").Page) {
+    await page.addInitScript(() => {
+      window.localStorage.setItem("bft-cookie-consent", JSON.stringify({ version: 1, decidedAt: new Date().toISOString(), preferences: { necessary: true, analytics: false, marketing: false } }));
+    });
+  }
+
+  test("steps aside while a form field has focus, and returns when focus leaves", async ({ page }) => {
+    await answeredCookieNotice(page);
+    await page.goto(ARTICLE);
+    const fab = page.locator('a.fixed[href^="tel:"]');
+    await expect(fab).toHaveAttribute("aria-hidden", "false", { timeout: 15000 });
+    await page.locator("#newsletter-email").focus();
+    await expect(fab).toHaveAttribute("aria-hidden", "true");
+    expect(await fab.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe("none");
+    await page.locator("#newsletter-email").blur();
+    await expect(fab).toHaveAttribute("aria-hidden", "false");
+  });
+
+  test("never covers anything at the end of the page", async ({ page }) => {
+    await answeredCookieNotice(page);
+    await page.goto(ARTICLE);
+    await page.waitForTimeout(1500);
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await page.waitForTimeout(500);
+    const covered = await page.evaluate(() => {
+      const fab = document.querySelector('a.fixed[href^="tel:"]');
+      // Hidden (faded out) counts as not covering anything.
+      if (!fab || getComputedStyle(fab).opacity === "0") return [];
+      const f = fab.getBoundingClientRect();
+      return [...document.querySelectorAll("footer a, footer button, footer p")].filter((el) => {
+        const b = el.getBoundingClientRect();
+        return b.width > 0 && Math.min(b.right, f.right) > Math.max(b.left, f.left) && Math.min(b.bottom, f.bottom) > Math.max(b.top, f.top);
+      }).map((el) => (el.textContent || "").trim().slice(0, 30));
+    });
+    expect(covered).toEqual([]);
+  });
+});
+
+test.describe("Reduced motion", () => {
+  test("respects prefers-reduced-motion: reveal content is immediately visible", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+    // Hero heading is wrapped in a Reveal (framer-motion whileInView) —
+    // under reduced motion it should render at full opacity without
+    // waiting on any animation/timeout.
+    const heading = page.getByRole("heading", { level: 1 });
+    await expect(heading).toBeVisible();
+    const opacity = await heading.evaluate((el) => getComputedStyle(el).opacity);
+    expect(Number(opacity)).toBeGreaterThan(0.9);
+  });
+
+  test("CSS animations and transitions collapse to ~instant, and the loading skeleton stops pulsing", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/flights");
+    // The global rule in globals.css flattens every transition/animation, so a
+    // control that normally eases (any <button>/<a>) reports a ~0 duration.
+    const durations = await page.evaluate(() => {
+      const ms = (v: string) => Math.max(...v.split(",").map((s) => (s.trim().endsWith("ms") ? parseFloat(s) : parseFloat(s) * 1000)));
+      const els = Array.from(document.querySelectorAll("a, button")).slice(0, 25);
+      return els.map((el) => ms(getComputedStyle(el).transitionDuration));
+    });
+    for (const d of durations) expect(d).toBeLessThanOrEqual(1);
+    // The skeleton's pulse (src/app/loading.tsx) is an infinite animation; under
+    // reduced motion it must be limited to a single, ~instant iteration.
+    const skeleton = await page.evaluate(() => {
+      const el = document.createElement("div");
+      el.className = "bfw-skeleton";
+      document.body.appendChild(el);
+      const s = getComputedStyle(el);
+      const out = { count: s.animationIterationCount, duration: s.animationDuration };
+      el.remove();
+      return out;
+    });
+    expect(skeleton.count).toBe("1");
+    expect(parseFloat(skeleton.duration) * (skeleton.duration.endsWith("ms") ? 1 : 1000)).toBeLessThanOrEqual(1);
+  });
+});

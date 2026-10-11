@@ -1,0 +1,109 @@
+import type { Metadata } from "next";
+import { LegalLayout, LegalSection } from "@/components/legal/LegalLayout";
+import { CONTACT_EMAIL, SITE_NAME } from "@/lib/constants";
+import { pageMetadata } from "@/lib/seo";
+
+// The "what this site actually sets" section below should be re-verified
+// against real cookie/storage usage at each future deploy — see docs/LEGAL.md.
+// As of this writing the site sets no cookies at all. There IS now a
+// cookie-preference center (src/components/consent/CookieConsent.tsx) that
+// stores a visitor's choice in localStorage (not a cookie) and exposes a
+// real hasConsent("analytics"|"marketing") check — nothing currently reads
+// it, because nothing optional exists yet, but if analytics or marketing
+// tooling is ever added, gate its loader behind that check and update this
+// policy in the same change rather than adding new consent plumbing.
+
+export const metadata: Metadata = pageMetadata({
+  title: "Cookie Policy",
+  description:
+    "How Business Flights Travel uses cookies and similar technologies on this website, and how to control them.",
+  path: "/cookie-policy",
+});
+
+const LAST_UPDATED = "September 7, 2026";
+
+export default function CookiePolicyPage() {
+  return (
+    <LegalLayout
+      title="Cookie Policy"
+      lastUpdated={LAST_UPDATED}
+      currentHref="/cookie-policy"
+      intro="This policy explains what cookies and similar technologies are, which ones this website uses, and how you can control them."
+    >
+      <LegalSection heading="1. What Cookies Are">
+        <p>
+          A cookie is a small text file that a website stores on your device when you visit it. Cookies let a site remember
+          information about your visit — such as your preferences, or that you&apos;ve interacted with a particular part of the
+          page — so it can work correctly and, where relevant, provide a more useful experience the next time you visit. &quot;Similar
+          technologies&quot; refers to other mechanisms that serve a comparable purpose, such as local storage in your browser.
+        </p>
+      </LegalSection>
+
+      <LegalSection heading="2. What This Site Currently Uses">
+        <p>
+          As of the &quot;Last updated&quot; date above, {SITE_NAME} does <strong>not</strong> set any cookies of its own. The
+          flight request form, contact form, and newsletter signup all work through standard page requests handled entirely on our
+          server — none of them rely on a cookie or browser storage to function, so there is nothing essential to disclose beyond
+          what your browser and our hosting provider do automatically to deliver the page to you.
+        </p>
+        <p>
+          On your first visit, a short notice confirms this and lets you record a preference for optional categories below —
+          stored in your browser&apos;s local storage, not a cookie — so that if we ever add an optional technology, it launches
+          already honoring your choice rather than resetting it.
+        </p>
+        <h3>Analytics cookies (only if and when enabled)</h3>
+        <p>
+          We do not currently run any analytics tool. If we enable a privacy-conscious one in the future to understand which pages
+          are useful to visitors — in aggregate, not to build individual profiles — it will only load for visitors who have
+          accepted the &quot;Analytics&quot; category in Cookie Preferences. Declining does not affect your ability to use the
+          flight request form or any other part of the Site.
+        </p>
+        <h3>Marketing cookies</h3>
+        <p>
+          We do not use third-party advertising or retargeting cookies on this Site, and have no current plans to. If that ever
+          changes, this policy will be updated first, and any such cookie would likewise only be set for visitors who have
+          accepted the &quot;Marketing&quot; category.
+        </p>
+      </LegalSection>
+
+      <LegalSection heading="3. Third-Party Cookies">
+        <p>
+          The Site does not currently embed any third-party service that sets its own cookies. If we begin using one — for
+          instance, an analytics provider — this policy will be updated to name that service before it goes live, and any cookies
+          it sets will be governed by that provider&apos;s own privacy and cookie policies in addition to this one.
+        </p>
+      </LegalSection>
+
+      <LegalSection heading="4. How to Control Cookies">
+        <p>You can control or disable cookies in several ways:</p>
+        <ul>
+          <li>
+            <strong>Cookie Settings:</strong> Use the &quot;Cookie Settings&quot; link in the footer of any page to reopen your
+            preferences at any time — accept, reject, or change your choice for Analytics and Marketing. Nothing about using the
+            Site or submitting a request depends on this choice.
+          </li>
+          <li>
+            <strong>Browser settings:</strong> Most browsers let you block or delete cookies, and clear local storage, through
+            their settings menu. Instructions vary by browser — check your browser&apos;s help documentation for details.
+          </li>
+        </ul>
+      </LegalSection>
+
+      <LegalSection heading="5. Changes to This Cookie Policy">
+        <p>
+          We may update this Cookie Policy as the Site evolves — for example, if we add a new analytics tool or feature that uses
+          cookies. When we do, we will revise the &quot;Last updated&quot; date at the top of this page. We encourage you to review
+          this page periodically.
+        </p>
+      </LegalSection>
+
+      <LegalSection heading="6. Contact Us">
+        <p>
+          If you have questions about this Cookie Policy, contact us at{" "}
+          <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>. For more on how we handle personal information generally, see our{" "}
+          <a href="/privacy-policy">Privacy Policy</a>.
+        </p>
+      </LegalSection>
+    </LegalLayout>
+  );
+}
