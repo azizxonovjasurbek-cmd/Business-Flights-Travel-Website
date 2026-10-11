@@ -37,7 +37,11 @@ Copy `.env.example` to `.env` and fill in the real `DATABASE_URL` — see
 ## Scripts
 
 - `npm run dev` — start the development server
-- `npm run build` — production build
+- `npm run build` — plain Next.js production build (not the Cloudflare build)
+- `npm run cf:build` — OpenNext/Cloudflare Worker build (`.open-next/`)
+- `npm run preview` — build and run the Worker locally
+- `npm run deploy` — build and deploy to Cloudflare manually (production deploys
+  run through Cloudflare Workers Builds; see `docs/ENVIRONMENT.md`)
 - `npm run start` — run a production build
 - `npm run lint` — run ESLint
 
