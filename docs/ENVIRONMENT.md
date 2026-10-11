@@ -215,3 +215,86 @@ multiple ways doesn't create separate, disconnected records.
   (`business-flights-travel-website`) or the build is rejected.
   Build command: `npx opennextjs-cloudflare build`; deploy command:
   `npx opennextjs-cloudflare deploy` (or `npx wrangler deploy`).
+
+### Worker runtime notes (measured)
+
+- **Prerendered pages need an incremental cache.** `open-next.config.ts` uses
+  OpenNext's read-only static-assets incremental cache. Without any cache,
+  every statically generated route with `dynamicParams = false` (the 171
+  destination city pages and 36 blog posts) returned 404 from the Worker
+  (`NoFallbackError`) while `next start` served them. The static-assets cache
+  needs no R2/KV binding, but it does not support revalidation: if you ever add
+  ISR / `revalidate` / `use cache`, switch to an R2 cache
+  (`r2IncrementalCache` plus an `NEXT_INC_CACHE_R2_BUCKET` binding).
+- **Prisma `compilerBuild = "small"`** (prisma/schema.prisma) embeds the
+  size-optimised query compiler WASM: Worker 18,478 KiB -> 16,111 KiB raw,
+  4,982 KiB -> 4,234 KiB gzip. Trade-off: slightly slower query compilation
+  (CPU time per query); results are identical.
+- **TLS to PostgreSQL on Workers:** `pg-cloudflare` ignores
+  `ssl.rejectUnauthorized: false` (src/lib/prisma.ts); the database certificate
+  must chain to a CA Cloudflare trusts, or connect through Cloudflare
+  Hyperdrive.
+
+### Cloudflare Error 1102 ("Worker exceeded resource limits")
+
+Error 1102 means a request exceeded the plan's CPU time or memory limit. The
+Workers **Free** plan allows about 10 ms of CPU per request; this app runs the
+full Next.js server inside the Worker through OpenNext.
+
+What was measured locally (workerd via `opennextjs-cloudflare preview`; wall
+time, not Cloudflare CPU, so use it only to compare configurations):
+
+| Request | `main` (no incremental cache) | with the static-assets cache |
+|---|---|---|
+| `/` cold / warm | 896 ms / ~106 ms | 333 ms / ~20 ms |
+| `/blog` warm | ~103 ms | ~20 ms |
+| a city page warm | 404 (not served) | ~15 ms |
+| `/flights` warm (dynamic route) | ~33 ms | ~40 ms |
+
+- Without an incremental cache the Worker re-renders every page with React on
+  each request, even prerendered ones. The static-assets cache serves the
+  prerendered output instead, roughly 5x less work per request.
+- The 16 MB server bundle (`server-functions/default/handler.mjs`) is imported
+  lazily inside the first request on each Worker instance, so a cold request
+  pays for parsing and initialising it. Cold requests are therefore the most
+  likely to hit the Free-plan limit, regardless of page.
+- `/flights` is the only dynamic route (it reads `?to=` for the destination
+  prefill from the 309 KB destinations registry), so it renders in the Worker
+  on every visit.
+- Open Graph images are prerendered at build time (`○ /opengraph-image`); the
+  `resvg`/`yoga` WASM is not initialised for ordinary page requests.
+- Prisma's query-compiler WASM is only decoded on the first database call
+  (form submissions), not for page views.
+
+These changes lower per-request work but cannot be proven to fit the Free-plan
+limit from outside Cloudflare. To confirm the cause on the live site, open
+Cloudflare dashboard -> Workers & Pages -> `business-flights-travel-website` ->
+**Observability** (Logs / Metrics) and look at the 1102 requests: the invocation
+outcome (`exceededCpu` or `exceededMemory`), the URL, whether it was the first
+request after a deploy or idle period, and the CPU-time percentiles under
+Metrics. Workers Logs are already enabled in `wrangler.jsonc`.
+
+If 1102 persists on the Free plan, the options are: (1) Workers Paid (the CPU
+limit is 30 s by default instead of 10 ms; the Worker size limit is already 64 MiB
+on both plans per Cloudflare's limits page, so size is not the issue); (2) serve the
+prerendered HTML directly from static assets so those requests never run the
+Worker (this changes how client-side navigation prefetches work and needs
+`_headers`/`_redirects` equivalents of the security headers and redirects in
+`next.config.ts`, so it should be a deliberate, separately tested change).
+
+Cloudflare's documentation (checked via the Cloudflare docs search) states: Free
+plan CPU time per HTTP request is 10 ms, SSR-style workloads typically use
+10-20 ms, an Error 1102 means the CPU time (or memory) limit was exceeded, and
+requests served from static assets are free and do not run the Worker.
+
+### Pull-request (preview) builds use a different command
+
+Workers Builds runs the **Build command** and then, for the production branch,
+the **Deploy command**; for every other branch it runs the **Preview command**
+instead (default `npx wrangler preview`). A pull-request check can therefore
+fail even though production builds succeed. If pull-request checks fail, open the
+build log in Cloudflare and look at which step failed; then either set the
+Preview command to a command that works with OpenNext (for example
+`npx opennextjs-cloudflare upload`, which creates a Worker version) or disable
+Preview Builds under Settings -> Builds -> Branch control. Production deploys do
+not depend on that setting.
