@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import bundleAnalyzer from "@next/bundle-analyzer";
+import { buildSecurityHeaders } from "./src/lib/security-headers";
 
 // Diagnostic-only — inert unless ANALYZE=true is set (`npm run analyze`),
 // so it never affects a normal `next build`/production deploy.
@@ -22,36 +23,7 @@ const withBundleAnalyzer = bundleAnalyzer({ enabled: process.env.ANALYZE === "tr
 // https://react.dev, this is stripped from the production build).
 const isDev = process.env.NODE_ENV !== "production";
 
-// No analytics loads anywhere in this app right now (see docs/ENVIRONMENT.md)
-// — no third-party script hosts need allowing here. If that changes, widen
-// this alongside whatever loads the script, not speculatively ahead of it.
-const csp = [
-  "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data:",
-  "font-src 'self' data:",
-  `connect-src 'self'${isDev ? " ws://localhost:* http://localhost:*" : ""}`,
-  "frame-ancestors 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "object-src 'none'",
-].join("; ");
-
-const securityHeaders = [
-  { key: "Content-Security-Policy", value: csp },
-  { key: "X-Content-Type-Options", value: "nosniff" },
-  { key: "X-Frame-Options", value: "DENY" },
-  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  {
-    key: "Permissions-Policy",
-    value: "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
-  },
-  // Only takes effect when actually served over HTTPS (the header itself is
-  // harmless over plain HTTP); enforced at the hosting/reverse-proxy layer,
-  // this just tells browsers to remember and require it going forward.
-  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
-];
+const securityHeaders = buildSecurityHeaders(isDev);
 
 const nextConfig: NextConfig = {
   // Cloudflare Workers (OpenNext) build: `pg` requires "pg-cloudflare" for its
