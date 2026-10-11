@@ -7,6 +7,12 @@ import staticAssetsIncrementalCache from "@opennextjs/cloudflare/overrides/incre
 // `dynamicParams = false` (destination city pages, blog posts) returned 404.
 // The static-assets cache serves them read-only from the Worker's own static
 // assets, so it needs no extra Cloudflare resources (no R2/KV binding).
-export default defineCloudflareConfig({
-  incrementalCache: staticAssetsIncrementalCache,
-});
+export default {
+  ...defineCloudflareConfig({
+    incrementalCache: staticAssetsIncrementalCache,
+  }),
+  // Same `next build` as `npm run build`, plus it publishes the prerendered
+  // pages as private static assets for the CPU-cheap fast path in
+  // worker/index.mjs (see scripts/cf-build.mjs). `npm run build` is unchanged.
+  buildCommand: "node scripts/cf-build.mjs",
+};

@@ -14,6 +14,7 @@ const eslintConfig = defineConfig([
     // OpenNext/Wrangler build output (generated).
     ".open-next/**",
     ".wrangler/**",
+    "public/cdn-cgi/**",
     "next-env.d.ts",
     // Vendored third-party skill/agent tooling (gitignored, not part of the
     // deployable app) — linting it just surfaces hundreds of warnings from

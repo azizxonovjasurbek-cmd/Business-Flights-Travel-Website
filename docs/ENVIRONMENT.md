@@ -234,3 +234,51 @@ multiple ways doesn't create separate, disconnected records.
   `ssl.rejectUnauthorized: false` (src/lib/prisma.ts); the database certificate
   must chain to a CA Cloudflare trusts, or connect through Cloudflare
   Hyperdrive.
+
+### Prerender fast path (Workers Free CPU limit)
+
+Production showed `Worker exceeded CPU time limit` (Error 1102) on `GET /` and
+on `GET /blog?_rsc=...`, `/contact?_rsc=...`, `/business-class?_rsc=...`,
+`/destinations/...?_rsc=...` (the RSC prefetch/navigation requests Next's
+`<Link>` sends), plus `Internal: NoFallbackError`. The Free plan allows ~10 ms
+of CPU per request.
+
+- `NoFallbackError` was a symptom of having no incremental cache: Next could not
+  find the prerendered output for `dynamicParams = false` routes (see the
+  static-assets cache note above).
+- Even with that cache, every request still started the Next/OpenNext handler.
+  Measured locally (wall time, the Worker simulator, not Cloudflare CPU): about
+  17-20 ms per cached page versus about 6 ms for a plain static asset.
+
+`worker/index.mjs` (wrangler `main`) therefore serves prerendered pages, their
+RSC payloads and prefetch segments directly from static assets and never loads
+Next for them (local: about 7-8 ms, close to the static-asset floor). It handles
+only `GET`/`HEAD` for routes in `worker/prerender-manifest.json` (document
+requests, and segment prefetches with `RSC: 1` + `Next-Router-Segment-Prefetch`
++ `_rsc`). Everything else goes to the unchanged OpenNext worker: forms / server
+actions (`POST`), `/flights` (dynamic, reads `?to=`), redirects, unknown URLs,
+and any request it is not certain about.
+
+- `scripts/cf-build.mjs` (OpenNext `buildCommand`, see `open-next.config.ts`)
+  runs the same `next build`, then copies the `.html`, `.rsc` and
+  `.segments/**` files Next generated into `public/cdn-cgi/_prerendered/` (private
+  assets: `cdn-cgi/` is reachable only through the Worker's `ASSETS` binding) and
+  writes `worker/prerender-manifest.json`. Both are generated and gitignored.
+  `npm run build` is still plain `next build`; the Cloudflare build command is
+  still `npx opennextjs-cloudflare build`.
+- Security headers come from one shared module, `src/lib/security-headers.ts`,
+  used by `next.config.ts` and the fast path.
+- Verified: for the 218 sitemap URLs and every prefetch segment of every
+  prerendered page (1,091 requests), response bodies are byte-identical to the
+  OpenNext path in the same build, with identical status, content type, cache and
+  security headers.
+- To confirm it on the live site: `curl -sI https://businessflights.travel/blog`
+  should include `x-bft-prerendered: 1`. A `POST`, `/flights` and unknown URLs
+  will not have it.
+- **Kill switch:** add the Worker variable `DISABLE_PRERENDER_FASTPATH` = `1`
+  (Cloudflare dashboard -> Worker -> Settings -> Variables) to send every request
+  through OpenNext again, without a redeploy.
+- Not covered: `/flights` and form submissions still run the Next handler
+  (about 35-40 ms warm locally), so they can still exceed the Free-plan CPU
+  limit; making `/flights` prerenderable (client-side `?to=` prefill) or
+  moving to Workers Paid would address that.
