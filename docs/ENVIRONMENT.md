@@ -275,8 +275,26 @@ request after a deploy or idle period, and the CPU-time percentiles under
 Metrics. Workers Logs are already enabled in `wrangler.jsonc`.
 
 If 1102 persists on the Free plan, the options are: (1) Workers Paid (the CPU
-limit is far higher and removes the Free-plan size limit); (2) serve the
+limit is 30 s by default instead of 10 ms; the Worker size limit is already 64 MiB
+on both plans per Cloudflare's limits page, so size is not the issue); (2) serve the
 prerendered HTML directly from static assets so those requests never run the
 Worker (this changes how client-side navigation prefetches work and needs
 `_headers`/`_redirects` equivalents of the security headers and redirects in
 `next.config.ts`, so it should be a deliberate, separately tested change).
+
+Cloudflare's documentation (checked via the Cloudflare docs search) states: Free
+plan CPU time per HTTP request is 10 ms, SSR-style workloads typically use
+10-20 ms, an Error 1102 means the CPU time (or memory) limit was exceeded, and
+requests served from static assets are free and do not run the Worker.
+
+### Pull-request (preview) builds use a different command
+
+Workers Builds runs the **Build command** and then, for the production branch,
+the **Deploy command**; for every other branch it runs the **Preview command**
+instead (default `npx wrangler preview`). A pull-request check can therefore
+fail even though production builds succeed. If pull-request checks fail, open the
+build log in Cloudflare and look at which step failed; then either set the
+Preview command to a command that works with OpenNext (for example
+`npx opennextjs-cloudflare upload`, which creates a Worker version) or disable
+Preview Builds under Settings -> Builds -> Branch control. Production deploys do
+not depend on that setting.
