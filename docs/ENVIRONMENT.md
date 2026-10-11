@@ -213,5 +213,19 @@ multiple ways doesn't create separate, disconnected records.
   Actions: every push to `main` builds and deploys the Worker. The `name` in
   `wrangler.jsonc` must equal the Worker's name in Cloudflare
   (`business-flights-travel-website`) or the build is rejected.
-  Build command: `npx opennextjs-cloudflare build`; deploy command:
-  `npx opennextjs-cloudflare deploy` (or `npx wrangler deploy`).
+- **Required Workers Builds settings** (Cloudflare dashboard -> Workers & Pages
+  -> `business-flights-travel-website` -> Settings -> Builds):
+  - Build command: `npx opennextjs-cloudflare build`
+  - Deploy command: `npx opennextjs-cloudflare deploy`
+    (`npx wrangler deploy` also works: in an OpenNext project it delegates to
+    `opennextjs-cloudflare deploy`.)
+  - Production branch: `main`
+- **Do not use `npm run build` as the Cloudflare build command.** It is the plain
+  Next.js build (`next build`) and never creates the OpenNext output. The deploy
+  step then fails with `Could not find compiled Open Next config, did you run the
+  build command?` (`.open-next/.build/open-next.config.edge.mjs` is missing).
+  `opennextjs-cloudflare build` already runs `npm run build` itself, so the
+  Next.js build still runs exactly once.
+- `npm run build` stays the standard Next.js production build (used for local
+  checks and the SEO tests). `npm run deploy` runs the OpenNext build followed
+  by the deploy for manual deployments.
