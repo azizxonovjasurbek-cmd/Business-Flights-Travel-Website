@@ -234,3 +234,49 @@ multiple ways doesn't create separate, disconnected records.
   `ssl.rejectUnauthorized: false` (src/lib/prisma.ts); the database certificate
   must chain to a CA Cloudflare trusts, or connect through Cloudflare
   Hyperdrive.
+
+### Cloudflare Error 1102 ("Worker exceeded resource limits")
+
+Error 1102 means a request exceeded the plan's CPU time or memory limit. The
+Workers **Free** plan allows about 10 ms of CPU per request; this app runs the
+full Next.js server inside the Worker through OpenNext.
+
+What was measured locally (workerd via `opennextjs-cloudflare preview`; wall
+time, not Cloudflare CPU, so use it only to compare configurations):
+
+| Request | `main` (no incremental cache) | with the static-assets cache |
+|---|---|---|
+| `/` cold / warm | 896 ms / ~106 ms | 333 ms / ~20 ms |
+| `/blog` warm | ~103 ms | ~20 ms |
+| a city page warm | 404 (not served) | ~15 ms |
+| `/flights` warm (dynamic route) | ~33 ms | ~40 ms |
+
+- Without an incremental cache the Worker re-renders every page with React on
+  each request, even prerendered ones. The static-assets cache serves the
+  prerendered output instead, roughly 5x less work per request.
+- The 16 MB server bundle (`server-functions/default/handler.mjs`) is imported
+  lazily inside the first request on each Worker instance, so a cold request
+  pays for parsing and initialising it. Cold requests are therefore the most
+  likely to hit the Free-plan limit, regardless of page.
+- `/flights` is the only dynamic route (it reads `?to=` for the destination
+  prefill from the 309 KB destinations registry), so it renders in the Worker
+  on every visit.
+- Open Graph images are prerendered at build time (`○ /opengraph-image`); the
+  `resvg`/`yoga` WASM is not initialised for ordinary page requests.
+- Prisma's query-compiler WASM is only decoded on the first database call
+  (form submissions), not for page views.
+
+These changes lower per-request work but cannot be proven to fit the Free-plan
+limit from outside Cloudflare. To confirm the cause on the live site, open
+Cloudflare dashboard -> Workers & Pages -> `business-flights-travel-website` ->
+**Observability** (Logs / Metrics) and look at the 1102 requests: the invocation
+outcome (`exceededCpu` or `exceededMemory`), the URL, whether it was the first
+request after a deploy or idle period, and the CPU-time percentiles under
+Metrics. Workers Logs are already enabled in `wrangler.jsonc`.
+
+If 1102 persists on the Free plan, the options are: (1) Workers Paid (the CPU
+limit is far higher and removes the Free-plan size limit); (2) serve the
+prerendered HTML directly from static assets so those requests never run the
+Worker (this changes how client-side navigation prefetches work and needs
+`_headers`/`_redirects` equivalents of the security headers and redirects in
+`next.config.ts`, so it should be a deliberate, separately tested change).
