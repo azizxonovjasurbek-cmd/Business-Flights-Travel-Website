@@ -215,3 +215,22 @@ multiple ways doesn't create separate, disconnected records.
   (`business-flights-travel-website`) or the build is rejected.
   Build command: `npx opennextjs-cloudflare build`; deploy command:
   `npx opennextjs-cloudflare deploy` (or `npx wrangler deploy`).
+
+### Worker runtime notes (measured)
+
+- **Prerendered pages need an incremental cache.** `open-next.config.ts` uses
+  OpenNext's read-only static-assets incremental cache. Without any cache,
+  every statically generated route with `dynamicParams = false` (the 171
+  destination city pages and 36 blog posts) returned 404 from the Worker
+  (`NoFallbackError`) while `next start` served them. The static-assets cache
+  needs no R2/KV binding, but it does not support revalidation: if you ever add
+  ISR / `revalidate` / `use cache`, switch to an R2 cache
+  (`r2IncrementalCache` plus an `NEXT_INC_CACHE_R2_BUCKET` binding).
+- **Prisma `compilerBuild = "small"`** (prisma/schema.prisma) embeds the
+  size-optimised query compiler WASM: Worker 18,478 KiB -> 16,111 KiB raw,
+  4,982 KiB -> 4,234 KiB gzip. Trade-off: slightly slower query compilation
+  (CPU time per query); results are identical.
+- **TLS to PostgreSQL on Workers:** `pg-cloudflare` ignores
+  `ssl.rejectUnauthorized: false` (src/lib/prisma.ts); the database certificate
+  must chain to a CA Cloudflare trusts, or connect through Cloudflare
+  Hyperdrive.
