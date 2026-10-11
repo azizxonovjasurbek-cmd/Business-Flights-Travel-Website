@@ -209,3 +209,9 @@ multiple ways doesn't create separate, disconnected records.
   trace via `outputFileTracingIncludes`. Without it the OpenNext bundle fails
   with `Could not resolve "pg-cloudflare"`.
 - `@opennextjs/cloudflare` 1.20.x requires `next` `>=16.3.8` (or 15.5.27+).
+- Automatic deploys use Cloudflare Workers Builds (Git integration), not GitHub
+  Actions: every push to `main` builds and deploys the Worker. The `name` in
+  `wrangler.jsonc` must equal the Worker's name in Cloudflare
+  (`business-flights-travel-website`) or the build is rejected.
+  Build command: `npx opennextjs-cloudflare build`; deploy command:
+  `npx opennextjs-cloudflare deploy` (or `npx wrangler deploy`).
